@@ -6,8 +6,8 @@ from tqdm import tqdm
 # --------------------------
 # 在这里修改你的路径
 # --------------------------
-INPUT_DIR = r"D:\all_need_mixture_splitted\bin_labels\test"    # 原始标签文件夹
-OUTPUT_DIR = r"D:\all_need_mixture_splitted\true_bin_labels\test"  # 处理后标签保存文件夹
+INPUT_DIR = r"/root/autodl-tmp/dataset/all_need_dataset/bin_labels/test"    # 原始标签文件夹
+OUTPUT_DIR = r"/root/autodl-tmp/dataset/all_need_dataset/mask/test"  # 处理后标签保存文件夹
 INVERT_MASK = True                            # 你的情况设为True（黑滑坡→1，白背景→0）
 THRESHOLD = 127                               # 二值化阈值，一般不用改
 # --------------------------

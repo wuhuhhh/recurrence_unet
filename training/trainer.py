@@ -1,24 +1,33 @@
 import torch
 import torch.optim as optim
+import wandb  # 导入wandb
 from .metrics import SegmentationMetrics, MetricTracker
 
 
 class UNetTrainer:
-    def __init__(self, model, device, train_loader, val_loader=None):
+    def __init__(self, model, device, train_loader, val_loader=None, experiment=None, save_dir='run'):
         self.model = model
         self.device = device
         self.train_loader = train_loader
         self.val_loader = val_loader
         self.metrics_calculator = SegmentationMetrics()
         self.model.to(self.device)
-
-    def train_epoch(self, optimizer, criterion, scheduler=None):
+        self.experiment = experiment  # WandB实验对象
+        self.global_step = 0  # 全局步数计数
+        self.save_dir = save_dir  # 新增保存目录
+    
+    def train_epoch(self, optimizer, criterion, cur_epoch, scheduler=None):
         """训练一个epoch"""
         self.model.train()
         tracker = MetricTracker()
+        epoch_loss = 0
+
+        # 定期记录图像示例（每10个batch）
+        log_images = True
 
         for batch_idx, (images, masks) in enumerate(self.train_loader):
             images, masks = images.to(self.device), masks.to(self.device)
+            self.global_step += 1
 
             # 前向传播
             optimizer.zero_grad()
@@ -35,6 +44,41 @@ class UNetTrainer:
             batch_metrics = self.metrics_calculator.calculate_all_metrics(outputs, masks)
             tracker.update(batch_metrics, loss.item())
 
+            epoch_loss += loss.item()
+
+            # 记录训练指标到WandB
+            if self.experiment:
+                # 记录每个batch的损失和学习率
+                self.experiment.log({
+                    'train/loss': loss.item(),
+                    'train/accuracy': batch_metrics['accuracy'],
+                    'train/dice': batch_metrics['dice'],
+                    'train/mIoU': batch_metrics['miou'],
+                    'learning_rate': optimizer.param_groups[0]['lr'],
+                    'step': self.global_step,
+                    'epoch': cur_epoch
+                })
+                
+
+                # 定期记录图像示例
+                # if log_images and batch_idx % 10 == 0:
+                #     # 处理输出以可视化（如果是 sigmoid 输出，转换为概率）
+                #     preds = torch.sigmoid(outputs) if outputs.shape[1] == 1 else torch.softmax(outputs, dim=1)
+                #     pred_masks = (preds > 0.5).float()  # 二值化
+
+                #     # 记录图像、真实掩码和预测掩码
+                #     self.experiment.log({
+                #         'train/sample_images': wandb.Image(
+                #             images[0].cpu(),
+                #             masks={
+                #                 "true": wandb.Image(masks[0].cpu()),
+                #                 "pred": wandb.Image(pred_masks[0].cpu())
+                #             },
+                #             caption=f"Train Epoch {cur_epoch}, Batch {batch_idx}"
+                #         )
+                #     })
+                #     log_images = False  # 每个epoch只记录一次图像
+
             if batch_idx % 10 == 0:
                 current_metrics = tracker.average()
                 print(f'Batch {batch_idx}/{len(self.train_loader)}, '
@@ -44,16 +88,17 @@ class UNetTrainer:
         avg_metrics = tracker.average()
         return avg_metrics
 
-    def validate(self, criterion):
-        """验证"""
+    def validate(self, criterion, epoch):
+        """验证并记录指标到WandB"""
         if self.val_loader is None:
             return None
 
         self.model.eval()
         tracker = MetricTracker()
+        log_images = True  # 记录验证图像
 
         with torch.no_grad():
-            for images, masks in self.val_loader:
+            for batch_idx, (images, masks) in enumerate(self.val_loader):
                 images, masks = images.to(self.device), masks.to(self.device)
                 outputs = self.model(images)
 
@@ -61,7 +106,39 @@ class UNetTrainer:
                 batch_metrics = self.metrics_calculator.calculate_all_metrics(outputs, masks)
                 tracker.update(batch_metrics, loss.item())
 
-        return tracker.average()
+                # 记录验证图像
+                # if self.experiment and log_images:
+                #     preds = torch.sigmoid(outputs) if outputs.shape[1] == 1 else torch.softmax(outputs, dim=1)
+                #     pred_masks = (preds > 0.5).float()
+
+                #     self.experiment.log({
+                #         'val/sample_images': wandb.Image(
+                #             images[0].cpu(),
+                #             masks={
+                #                 "true": wandb.Image(masks[0].cpu()),
+                #                 "pred": wandb.Image(pred_masks[0].cpu())
+                #             },
+                #             caption=f"Val Epoch {epoch}"
+                #         )
+                #     })
+                #     log_images = False
+
+        val_metrics = tracker.average()
+
+        # 记录验证指标到WandB
+        if self.experiment:
+            self.experiment.log({
+                'val/loss': val_metrics['loss'],
+                'val/accuracy': val_metrics['accuracy'],
+                'val/dice': val_metrics['dice'],
+                'val/mIoU': val_metrics['miou'],
+                'val/precision': val_metrics['precision'],
+                'val/recall': val_metrics['recall'],
+                'val/f1': val_metrics['f1'],
+                'epoch': epoch
+            })
+
+        return val_metrics
 
     def train(self, epochs, optimizer, criterion, scheduler=None, save_path='best_model.pth'):
         """完整训练过程"""
@@ -79,7 +156,7 @@ class UNetTrainer:
             print('-' * 60)
 
             # 训练
-            train_metrics = self.train_epoch(optimizer, criterion, scheduler)
+            train_metrics = self.train_epoch(optimizer, criterion, epoch, scheduler)
 
             # 记录训练指标
             train_history['epoch'].append(epoch + 1)
@@ -88,9 +165,19 @@ class UNetTrainer:
 
             print(f"Train - {self._format_metrics(train_metrics)}")
 
+            # 记录 epoch 级别的训练指标
+            if self.experiment:
+                self.experiment.log({
+                    'train/epoch_loss': train_metrics['loss'],
+                    'train/epoch_accuracy': train_metrics['accuracy'],
+                    'train/epoch_mIoU': train_metrics['miou'],
+                    'train/epoch_dice': train_metrics['dice'],
+                    'epoch': epoch + 1
+                })
+
             # 验证
             if self.val_loader is not None:
-                val_metrics = self.validate(criterion)
+                val_metrics = self.validate(criterion, epoch + 1)
 
                 # 记录验证指标
                 for key in val_metrics:
@@ -98,11 +185,13 @@ class UNetTrainer:
 
                 print(f"Val   - {self._format_metrics(val_metrics)}")
 
-                # 保存最佳模型 (基于验证损失)
+                # 保存最佳模型
                 if val_metrics['loss'] < best_val_loss:
                     best_val_loss = val_metrics['loss']
                     torch.save(self.model.state_dict(), save_path)
                     print(f"💾 保存最佳模型: {save_path} (Loss: {best_val_loss:.4f})")
+                    if self.experiment:
+                        self.experiment.log({"best_val_loss": best_val_loss})
 
             # 学习率调度
             if scheduler is not None:

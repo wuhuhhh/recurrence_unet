@@ -12,7 +12,7 @@ class LandslideDataset(Dataset):
         self.transform = transform
         self.image_size = image_size
 
-        self.image_files = [f for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
+        self.image_files = [f for f in os.listdir(image_dir) if f.endswith(('.png', '.jpg', '.jpeg','.TIF'))]
 
         if transform is None:
             self.transform = transforms.Compose([
@@ -34,7 +34,10 @@ class LandslideDataset(Dataset):
         img_path = os.path.join(self.image_dir, img_name)
         image = Image.open(img_path).convert('RGB')
 
-        mask_name = img_name.replace('.jpg', '.png').replace('.jpeg', '.png')
+        # mask_name = img_name.replace('.jpg', '.png').replace('.jpeg', '.png')
+        # 格式转换，将图片都转换成png之后，去掩码中找对应的，*.png（因此这里逻辑可能需要修改，因为掩码必须要求.png）
+        mask_name = img_name.replace('.jpg', '.png').replace('.jpeg', '.png').replace('.TIF', '.png')  
+        
         mask_path = os.path.join(self.mask_dir, mask_name)
         mask = Image.open(mask_path).convert('L')
 

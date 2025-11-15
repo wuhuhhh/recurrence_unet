@@ -7,13 +7,14 @@ import torch
 from PIL import Image
 import numpy as np
 import torchvision.transforms as transforms
-from models import UNet
+from models import UNet, ResidualUNet
 
 
-def predict(model_path, image_path, output_path, device='cuda', image_size=512):
+def predict(model_path, image_path, output_path, device='cpu', image_size=512):
     """对单张图像进行滑坡分割预测"""
     # 加载模型
-    model = UNet(in_channels=3, out_channels=1)
+    # model = UNet(n_channels=3, n_classes=1)
+    model = ResidualUNet(n_channels=3, n_classes=1)
     model.load_state_dict(torch.load(model_path, map_location=device))
     model.to(device)
     model.eval()
@@ -49,8 +50,9 @@ def predict(model_path, image_path, output_path, device='cuda', image_size=512):
 
 if __name__ == "__main__":
     # 使用示例
-    model_path = "best_landslide_unet.pth"
-    image_path = "test_image.jpg"
-    output_path = "prediction.png"
+    # model_path = "run/bcd_dice_5epoch/best_landslide_unet.pth"
+    model_path = "/root/autodl-tmp/recurrence_unet/scripts/run/BFA_5epoch/best_landslide_unet.pth"
+    image_path = "test/a1_3-2.jpg"
+    output_path = "test/a1_3-2_pre.jpg"
 
     predict(model_path, image_path, output_path)
